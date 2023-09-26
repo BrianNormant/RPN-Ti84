@@ -6,7 +6,7 @@
 
 real_t stack[101];
 char buffer[50];
-uint8_t idx;
+uint8_t idx; // The current idx of the stack
 bool decimal;
 bool negative;
 bool constantsmode = false;
@@ -20,7 +20,7 @@ bool radians = true;
 real_t decimalfactor;
 
 real_t r_0, r_1, r_2, r_3, r_4, r_5, r_6, r_7, r_8, r_9, r_10, r_n1, r_ln10, r_pi, r_e;
-
+// r_0 is the value we are editing
 void init_real_constants() {
 	r_0  = os_Int24ToReal(0);
 	r_1  = os_Int24ToReal(1);
@@ -139,6 +139,33 @@ void new_problem() {
 	os_ClrHome();
 	buffer[0] = 0;
 	new_entry();
+}
+
+void swap() {
+	// Swap the very first two entries of the stack.
+	if (os_RealCompare(&stack[idx], &r_0) != 0) {
+		// We are typing a number
+		if (idx >= 1) {
+			real_t tmp = stack[idx];
+			stack[idx] = stack[idx - 1];
+			r_0 = stack[idx - 1];
+			stack[idx - 1] = tmp;
+			os_SetRealListElement(ti_L1, idx, &stack[idx - 1]);
+			draw_stack_clear(idx-1, true);
+			draw_line_clear(false);
+		}
+	} else {
+		// We are not
+		if (idx >= 2) {
+			real_t tmp = stack[idx-1];
+			stack[idx-1] = stack[idx-2];
+			stack[idx-2] = tmp;
+			os_SetRealListElement(ti_L1, idx, &stack[idx - 1]);
+			draw_stack_clear(idx-1, true);
+			draw_stack_clear(idx-2, true);
+			
+		}
+	}
 }
 
 #define BINARY_OP(os_func)												\
@@ -272,6 +299,8 @@ void main() {
 			} else if (key == sk_Del) {
 				constants_mode(false);
 				new_problem();
+			} else if (key == sk_Vars) {
+				swap();
 			}
 		} else {
 			if (key == sk_0 || key == sk_1 || key == sk_2 || key == sk_3 || key == sk_4 ||
