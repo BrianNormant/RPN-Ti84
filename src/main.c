@@ -10,7 +10,12 @@ uint8_t idx;
 bool decimal;
 bool negative;
 bool constantsmode = false;
-bool scimode = true;
+uint8_t drawmode = 0; /*
+0 -> normal
+1 -> scientific
+2 -> engineering 3
+3 -> engineering 6
+*/
 bool radians = true;
 real_t decimalfactor;
 
@@ -64,10 +69,22 @@ void draw_stack_clear(uint8_t row, bool clear) {
 		os_SetCursorPos(8, 4);
 		os_PutStrFull(buffer);
 	} else {
-		if (scimode) {
-			os_RealToStr(buffer, &stack[row], 0, 2, 2);
-		} else {
-			os_RealToStr(buffer, &stack[row], 0, 1, -1);
+		switch (drawmode) {
+			case 0:
+				os_RealToStr(buffer, &stack[row], 0, 1, -1);
+				break;
+			case 1:
+				os_RealToStr(buffer, &stack[row], 0, 2, 2);
+				break;
+			case 2:
+				os_RealToStr(buffer, &stack[row], 0, 3, 3);
+				break;
+			case 3:
+				os_RealToStr(buffer, &stack[row], 0, 3, 6);
+				break;
+			default:
+				os_RealToStr(buffer, &stack[row], 0, 1, -1);
+				break;
 		}
 		if (clear) {
 			os_SetCursorPos(row, 0);
@@ -334,7 +351,8 @@ void main() {
 					new_entry();
 				}
 			} else if (key == sk_Mode) {
-				scimode = !scimode;
+				drawmode++;
+				if (drawmode > 3) drawmode = 0;
 				draw_full_stack();
 			} else if (key == sk_Del) {
 				new_problem();
