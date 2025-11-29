@@ -1,26 +1,41 @@
-#include <tice.h>
+#include <ti/screen.h>
+#include <ti/real.h>
+#include <ti/getcsc.h>
+#include <ti/vars.h>
 
-// <fileioc.h>
-#define ti_X ("\x58\0\0")
-#define ti_L1 ("\x5D\x0\0")
-
-real_t stack[101];
+real_t stack[101], r_edit;
 char buffer[50];
 uint8_t idx; // The current idx of the stack
 bool decimal;
 bool negative;
 bool constantsmode = false;
-uint8_t drawmode = 0; /*
-0 -> normal
-1 -> scientific
-2 -> engineering 3
-3 -> engineering 6
-*/
-bool radians = true;
+
+// How to represent the number.
+typedef enum drawmode {
+	NOR,
+	SCI,
+	ENG3,
+	ENG6,
+} drawmode_e;
+drawmode_e drawmode;
+
+// Degree or radian
+typedef enum drg {
+	DEGREE,
+	RADIAN,
+} drg_e;
+drg_e drg;
+
 real_t decimalfactor;
 
+// variable to store the last operand of a unary/binary.
+bool last_is_unary;
+real_t last_oprd1, last_oprd2;
+
+typedef real_t(*unary_op_ptr)(real_t*);
+typedef real_t(*binary_op_ptr)(real_t*, real_t*);
+
 real_t r_0, r_1, r_2, r_3, r_4, r_5, r_6, r_7, r_8, r_9, r_10, r_n1, r_ln10, r_pi, r_e;
-// r_0 is the value we are editing
 void init_real_constants() {
 	r_0  = os_Int24ToReal(0);
 	r_1  = os_Int24ToReal(1);
@@ -35,12 +50,18 @@ void init_real_constants() {
 	r_10 = os_Int24ToReal(10);
 	r_n1 = os_Int24ToReal(-1);
 	r_ln10 = os_RealLog(&r_10);
-	r_pi   = os_RealAsinRad(&r_n1); // See CE-Programming/toolchain PR #358
+	r_pi   = os_RealAcosRad(&r_n1); // See CE-Programming/toolchain PR #358
 	r_e    = os_RealExp(&r_1);
 }
 
+/**
+ * Draw the number we are editing
+ * at the very bottom of the screen
+ * @clear weather clean the last string beforehand
+ */
 void draw_line_clear(bool clear) {
-	os_RealToStr(buffer, &stack[idx], 0, 1, -1);
+	// set to 9 to always draw the zero when typing
+	os_RealToStr(buffer, &stack[idx], 0, 1, 9);
 	if (clear) {
 		os_SetCursorPos(9, 0);
 		os_PutStrFull("               ");
@@ -60,7 +81,17 @@ void drawdecimal_line() {
 	os_PutStrFull(".");
 }
 
+/**
+ * Draw a specific entry of the stack. If the display area is too small,
+ * ie stack entry is >= 9, move all the numbers up 1 time and show on the first line the amount of number not shown
+ * @row the row of the stack to draw.
+ */
 void draw_stack_clear(uint8_t row, bool clear) {
+	if (row < 9) {
+		os_SetCursorPos(idx, 0);
+		os_RealToStr(buffer, &stack[row], 0, 1, -1);
+	}
+
 	if (row >= 9) {
 		os_SetCursorPos(8, 0);
 		os_PutStrFull("...            ");
@@ -69,23 +100,6 @@ void draw_stack_clear(uint8_t row, bool clear) {
 		os_SetCursorPos(8, 4);
 		os_PutStrFull(buffer);
 	} else {
-		switch (drawmode) {
-			case 0:
-				os_RealToStr(buffer, &stack[row], 0, 1, -1);
-				break;
-			case 1:
-				os_RealToStr(buffer, &stack[row], 0, 2, 2);
-				break;
-			case 2:
-				os_RealToStr(buffer, &stack[row], 0, 3, 3);
-				break;
-			case 3:
-				os_RealToStr(buffer, &stack[row], 0, 3, 6);
-				break;
-			default:
-				os_RealToStr(buffer, &stack[row], 0, 1, -1);
-				break;
-		}
 		if (clear) {
 			os_SetCursorPos(row, 0);
 			os_PutStrFull("               ");
@@ -126,6 +140,9 @@ void constants_mode(bool enabled) {
 	}
 }
 
+/**
+ * Push the number we are editing in the stack
+ */
 void new_entry() {
 	decimal = false;
 	negative = false;
@@ -136,35 +153,23 @@ void new_entry() {
 
 void new_problem() {
 	idx = 0;
+	stack[0] = r_0;
 	os_ClrHome();
 	buffer[0] = 0;
 	new_entry();
 }
 
+/**
+ * Swap 2 entries in the stack.
+ * Only swap if the user is not editing a number and the stack has at least 2 entries
+ */
 void swap() {
-	// Swap the very first two entries of the stack.
-	if (os_RealCompare(&stack[idx], &r_0) != 0) {
-		// We are typing a number
-		if (idx >= 1) {
-			real_t tmp = stack[idx];
-			stack[idx] = stack[idx - 1];
-			r_0 = stack[idx - 1];
-			stack[idx - 1] = tmp;
-			os_SetRealListElement(ti_L1, idx, &stack[idx - 1]);
-			draw_stack_clear(idx-1, true);
-			draw_line_clear(false);
-		}
-	} else {
-		// We are not
-		if (idx >= 2) {
-			real_t tmp = stack[idx-1];
-			stack[idx-1] = stack[idx-2];
-			stack[idx-2] = tmp;
-			os_SetRealListElement(ti_L1, idx, &stack[idx - 1]);
+	if (idx > 1 && !os_RealCompare(&stack[idx], &r_0)) {
+			real_t tmp = os_RealCopy(stack + idx - 1);
+			stack[idx - 1] = os_RealCopy(stack + idx - 2);
+			stack[idx - 2] = tmp;
 			draw_stack_clear(idx-1, true);
 			draw_stack_clear(idx-2, true);
-			
-		}
 	}
 }
 
@@ -174,7 +179,6 @@ do {																	\
 		if (idx >= 1) {													\
 			stack[idx-1] = os_func(&stack[idx-1], &stack[idx]);			\
 			draw_stack_clear(idx-1, true);								\
-			os_SetRealListElement(ti_L1, idx, &stack[idx-1]);           \
 			new_entry();												\
 		}																\
 	} else {															\
@@ -183,12 +187,10 @@ do {																	\
 			draw_stack_clear(idx-2, true);								\
 			delete_stack(idx-1);										\
 			idx--;														\
-			os_SetListDim(ti_L1, idx);                                  \
-			os_SetRealListElement(ti_L1, idx, &stack[idx-1]);           \
 			new_entry();												\
 		}																\
 	}																	\
-} while (false) 
+} while (false)
 
 #define UNARY_OP(os_func) 												\
 do {																	\
@@ -249,7 +251,7 @@ real_t realScientificNotation(real_t *a, real_t *b) {
 	return os_RealMul(a, &m);
 }
 
-void main() {
+int main(void) {
 	uint8_t key;
 	
 	init_real_constants();
@@ -275,11 +277,11 @@ void main() {
 			} else if (key == sk_Ln) {
 				UNARY_OP(os_RealExp);
 				constants_mode(false);
-			} else if (key == sk_Sin) { // asin and cos switched intentionally
-				UNARY_OP(radDegAcos);   // See CE-Programming/toolchain PR #358
-				constants_mode(false);
+			} else if (key == sk_Sin) {
+				UNARY_OP(radDegAsin);   // See CE-Programming/toolchain PR #358
+				constants_mode(false);  // #358 has been merged.
 			} else if (key == sk_Cos) {
-				UNARY_OP(radDegAsin);
+				UNARY_OP(radDegAcos);
 				constants_mode(false);
 			} else if (key == sk_Tan) {
 				UNARY_OP(radDegAtan);
@@ -444,8 +446,8 @@ void main() {
 
 				uint24_t font_height = os_FontGetHeight() + 3;
 				uint24_t spacing = font_height * 2; // So starts past bar
-				const char* keys[] = { 
-					"^  Pop stack", 
+				const char* keys[] = {
+					"^  Pop stack",
 					"<  Backspace",
 					"del  Clear stack",
 					"mode  Switch notation",
@@ -472,4 +474,5 @@ void main() {
 			}
 		}
 	}
+	return 0;
 }
