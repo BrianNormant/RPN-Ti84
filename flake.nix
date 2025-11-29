@@ -31,12 +31,19 @@
   };
   in {
     devShells."${system}".default = pkgs.mkShell {
-      packages = with pkgs; [ cepkgs.ce-toolchain gnumake cemu-ti man-pages tilp];
+      packages = with pkgs; [
+        cepkgs.ce-toolchain
+        gnumake
+        cemu-ti
+        man-pages
+        tilp
+      ];
       shellHook = ''
         tmux rename-session "${ce_program_name}"
         tmux rename-window $EDITOR
         export CFLAGS=${cepkgs.ce-toolchain}/include:$CFLAGS
-        exec nvim ./src
+		export SHELL=zsh
+		exec $SHELL
       '';
     };
     packages.x86_64-linux.default = let

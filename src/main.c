@@ -3,12 +3,16 @@
 #include <ti/getcsc.h>
 #include <ti/vars.h>
 
+#define ti_X OS_VAR_X
+#define ti_L1 OS_VAR_L1
+
 real_t stack[101], r_edit;
 char buffer[50];
 uint8_t idx; // The current idx of the stack
 bool decimal;
 bool negative;
 bool constantsmode = false;
+bool radians = true;
 
 // How to represent the number.
 typedef enum drawmode {
@@ -353,6 +357,8 @@ int main(void) {
 					decimal = true;
 					decimalfactor = os_RealDiv(&r_1, &r_10);
 					drawdecimal_line();
+				} else {
+					decimal = false;
 				}
 			} else if (key == sk_Clear) {
 				new_entry();
